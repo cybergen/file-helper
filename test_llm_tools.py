@@ -9,22 +9,6 @@ from pathlib import Path
 from typing import List, Dict
 from datetime import datetime
 
-def create_weather_tool():
-    return {
-        "name": "get_current_weather",
-        "description": "Get the current weather in a given location",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
-                }
-            },
-            "required": ["location"],
-        }
-    }
-
 def create_filesystem_tool():
     return {
         "name": "list_directory",
@@ -192,15 +176,16 @@ def create_scratch_buffer_reader_tool():
         }
     }
 
-scratch_buffer = []
+scratch_buffer = ""
 
 def add_to_scratch_buffer(text: str) -> None:
     """Add a string to the scratch buffer"""
-    scratch_buffer.append(text)
+    global scratch_buffer
+    scratch_buffer += text + "\n\n"
 
 def get_scratch_buffer() -> str:
     """Retrieve the entire contents of the scratch buffer"""
-    return "\n".join(scratch_buffer)
+    return scratch_buffer
 
 def create_tool_prompt(tools: List[Dict]):
     tool_descriptions = []
@@ -218,7 +203,6 @@ If you choose to call a function ONLY reply in the following format with no pref
 <function=example_function_name>{{"example_name": "example_value"}}</function>
 
 Reminder:
-- If looking for real time information use relevant functions before falling back to brave_search
 - Function calls MUST follow the specified format, start with <function= and end with </function>
 - Required parameters MUST be specified
 - Only call one function at a time
@@ -249,6 +233,10 @@ def extract_function_call(response: str) -> tuple[str, dict]:
             # Remove closing tag if it exists
             params_str = params_str.split("</function>")[0]
             
+            # If params_str is empty, return empty dict
+            if not params_str.strip():
+                return function_name, {}
+            
             # Try to parse parameters as JSON
             try:
                 params = json.loads(params_str)
@@ -272,8 +260,6 @@ def execute_tool_call(response: str) -> str:
                 params.get("recursive", False)
             )
             return json.dumps(files, indent=2)
-        elif function_name == "get_current_weather":
-            return f"Would fetch weather for: {params['location']}"
         elif function_name == "read_files":
             file_contents = read_files(params["file_paths"])
             return file_contents
@@ -291,7 +277,6 @@ def execute_tool_call(response: str) -> str:
 
 def make_chat_request(prompt, api_url="http://127.0.0.1:1234/v1/chat/completions"):
     tools = [
-        create_weather_tool(),
         create_filesystem_tool(),
         create_file_reader_tool(),
         create_scratch_buffer_tool(),
@@ -334,7 +319,8 @@ def make_chat_request(prompt, api_url="http://127.0.0.1:1234/v1/chat/completions
         
         # If the response looks like a function call, execute it
         if model_response.startswith("<function="):
-            tool_result = execute_tool_call(model_response)
+            tool_result = execute_tool_call(model_response)            
+            print("Debug - Scratch buffer:", scratch_buffer)
             return f"Model response: {model_response}\n\nTool execution result:\n{tool_result}"
         return model_response
         
