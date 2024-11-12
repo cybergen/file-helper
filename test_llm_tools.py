@@ -6,6 +6,8 @@ import sys
 import os
 from typing import List, Dict
 from pathlib import Path
+from typing import List, Dict
+from datetime import datetime
 
 def create_weather_tool():
     return {
@@ -32,7 +34,7 @@ def create_filesystem_tool():
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The directory path to search in (use 'current' for current directory)"
+                    "description": "The directory path to search in. Special values: 'current' for current directory, '..' for parent directory, 'D:' for drive root"
                 },
                 "extension": {
                     "type": "string",
@@ -48,6 +50,25 @@ def create_filesystem_tool():
         }
     }
 
+def create_file_reader_tool():
+    return {
+        "name": "read_files",
+        "description": "Read a batch of one or more files and return their text, each preceded by a delimiter",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "A list of file paths to read"
+                }
+            },
+            "required": ["file_paths"]
+        }
+    }
+
 def normalize_extension(extension: str) -> str:
     """Normalize file extension to include the dot and lowercase"""
     if not extension:
@@ -55,25 +76,44 @@ def normalize_extension(extension: str) -> str:
     ext = extension.lower()
     return f".{ext.lstrip('.')}"
 
-def list_files(path_str: str, extension: str = None, recursive: bool = False) -> List[str]:
-    """List files with improved path handling"""
+def normalize_path(path_str: str) -> Path:
+    """Safely normalize and resolve various path formats"""
     try:
-        # Handle special 'current' keyword
-        if path_str.lower() in ['current', '.', '']:
-            path = Path.cwd()
+        # Handle special cases
+        if path_str.lower() in ['current', '.']:
+            return Path.cwd()
+        elif path_str == '..':
+            return Path.cwd().parent
+        elif path_str.lower().endswith(':'):  # Handle drive root like 'D:'
+            # Add backslash to ensure root directory
+            return Path(f"{path_str}\\").resolve()
+        elif path_str.lower().endswith(':\\'):  # Handle drive root like 'D:\'
+            return Path(path_str).resolve()
+        elif path_str.lower() in ['current', '.', '']:
+            return Path.cwd()
         else:
-            path = Path(path_str)
+            # Handle relative paths
+            return Path(path_str).resolve()
+    except Exception as e:
+        raise ValueError(f"Invalid path format: {str(e)}")
 
-        # Convert to absolute path
-        path = path.resolve()
+def list_files(path_str: str, extension: str = None, recursive: bool = False) -> Dict:
+    """List files with enhanced path handling"""
+    try:
+        try:
+            path = normalize_path(path_str)
+        except ValueError as e:
+            return {"error": f"Error with path: {str(e)}"}
         
         if not path.exists():
-            return [f"Error: Path '{path}' does not exist"]
+            return {"error": f"Error: Path '{path}' does not exist"}
+            
+        # Add safety check for drive access
+        if not any(path.drive.lower() == f"{d}:" for d in 'abcdefghijklmnopqrstuvwxyz'):
+            return {"error": f"Error: Invalid drive in path '{path}'"}
         
         files = []
         normalized_ext = normalize_extension(extension) if extension else None
-        
-        # Define pattern for matching files
         pattern = f"*{normalized_ext}" if normalized_ext else "*"
         
         try:
@@ -82,22 +122,85 @@ def list_files(path_str: str, extension: str = None, recursive: bool = False) ->
             else:
                 file_paths = path.glob(pattern)
                 
-            # Convert to list and filter for files only
-            files = [str(f) for f in file_paths if f.is_file()]
+            for file_path in file_paths:
+                if file_path.is_file():
+                    file_info = {
+                        "file_name": file_path.name,
+                        "date_created": datetime.fromtimestamp(file_path.stat().st_ctime).isoformat(),
+                        "date_modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
+                        "file_type": file_path.suffix
+                    }
+                    files.append(file_info)
             
             # Sort files for consistent output
-            files.sort()
+            files.sort(key=lambda x: x["file_name"])
             
-            if not files:
-                return [f"No files found matching pattern{f' with extension {normalized_ext}' if normalized_ext else ''}"]
-                
-            return files
+            return {
+                "starting_path": str(path),
+                "file_count": len(files),
+                "files": files
+            }
             
+        except PermissionError:
+            return {"error": f"Permission denied accessing some paths in '{path}'"}
         except Exception as e:
-            return [f"Error during file search: {str(e)}"]
+            return {"error": f"Error during file search in '{path}': {str(e)}"}
             
     except Exception as e:
-        return [f"Error with path handling: {str(e)}"]
+        return {"error": f"Error with path handling: {str(e)}"}
+    
+def read_files(file_paths: List[str]) -> str:
+    """Read a batch of one or more files and return their text with a delimiter"""
+    result = []
+    delimiter = "==========="
+    for file_path_str in file_paths:
+        try:
+            file_path = Path(file_path_str).resolve()
+            if not file_path.is_file():
+                result.append(f"Error: '{file_path_str}' is not a valid file")
+                continue
+            with open(file_path, 'r', encoding='utf-8') as file:
+                file_content = file.read()
+                result.append(f"{delimiter}{file_path.as_posix()}\n{file_content}")
+        except Exception as e:
+            result.append(f"Error reading file '{file_path_str}': {str(e)}")
+    return "\n".join(result)
+
+def create_scratch_buffer_tool():
+    return {
+        "name": "add_to_scratch_buffer",
+        "description": "Add a string to the scratch buffer",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text to add to the scratch buffer"
+                }
+            },
+            "required": ["text"]
+        }
+    }
+
+def create_scratch_buffer_reader_tool():
+    return {
+        "name": "get_scratch_buffer",
+        "description": "Retrieve the entire contents of the scratch buffer",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+
+scratch_buffer = []
+
+def add_to_scratch_buffer(text: str) -> None:
+    """Add a string to the scratch buffer"""
+    scratch_buffer.append(text)
+
+def get_scratch_buffer() -> str:
+    """Retrieve the entire contents of the scratch buffer"""
+    return "\n".join(scratch_buffer)
 
 def create_tool_prompt(tools: List[Dict]):
     tool_descriptions = []
@@ -123,6 +226,8 @@ Reminder:
 
 Example usage for listing files:
 - List all files in current directory: <function=list_directory>{{"path": "current"}}</function>
+- List files in parent directory: <function=list_directory>{{"path": ".."}}</function>
+- List files in drive root: <function=list_directory>{{"path": "D:"}}</function>
 - Find all Python files recursively: <function=list_directory>{{"path": "current", "extension": ".py", "recursive": true}}</function>
 - Find JavaScript files in specific directory: <function=list_directory>{{"path": "src", "extension": ".js"}}</function>
 """
@@ -169,6 +274,14 @@ def execute_tool_call(response: str) -> str:
             return json.dumps(files, indent=2)
         elif function_name == "get_current_weather":
             return f"Would fetch weather for: {params['location']}"
+        elif function_name == "read_files":
+            file_contents = read_files(params["file_paths"])
+            return file_contents
+        elif function_name == "add_to_scratch_buffer":
+            add_to_scratch_buffer(params["text"])
+            return "Text added to scratch buffer"
+        elif function_name == "get_scratch_buffer":
+            return get_scratch_buffer()
         else:
             return f"Unknown function: {function_name}"
     except ValueError as e:
@@ -177,7 +290,13 @@ def execute_tool_call(response: str) -> str:
         return f"Error executing tool: {e}\nFull response: {response}"
 
 def make_chat_request(prompt, api_url="http://127.0.0.1:1234/v1/chat/completions"):
-    tools = [create_weather_tool(), create_filesystem_tool()]
+    tools = [
+        create_weather_tool(),
+        create_filesystem_tool(),
+        create_file_reader_tool(),
+        create_scratch_buffer_tool(),
+        create_scratch_buffer_reader_tool()
+    ]
     tool_prompt = create_tool_prompt(tools)
     
     headers = {
