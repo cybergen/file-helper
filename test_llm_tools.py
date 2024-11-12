@@ -53,6 +53,42 @@ def create_file_reader_tool():
         }
     }
 
+def create_scratch_buffer_tool():
+    return {
+        "name": "add_to_scratch_buffer",
+        "description": "Add a string to the scratch buffer",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text to add to the scratch buffer"
+                }
+            },
+            "required": ["text"]
+        }
+    }
+
+def create_scratch_buffer_reader_tool():
+    return {
+        "name": "get_scratch_buffer",
+        "description": "Retrieve the entire contents of the scratch buffer",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+
+def create_complex_evaluator_tool():
+    return {
+        "name": "complex_evaluator_tool",
+        "description": "Evaluate an instruction by generating a sequence of calls",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+
 def normalize_extension(extension: str) -> str:
     """Normalize file extension to include the dot and lowercase"""
     if not extension:
@@ -149,32 +185,6 @@ def read_files(file_paths: List[str]) -> str:
         except Exception as e:
             result.append(f"Error reading file '{file_path_str}': {str(e)}")
     return "\n".join(result)
-
-def create_scratch_buffer_tool():
-    return {
-        "name": "add_to_scratch_buffer",
-        "description": "Add a string to the scratch buffer",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to add to the scratch buffer"
-                }
-            },
-            "required": ["text"]
-        }
-    }
-
-def create_scratch_buffer_reader_tool():
-    return {
-        "name": "get_scratch_buffer",
-        "description": "Retrieve the entire contents of the scratch buffer",
-        "parameters": {
-            "type": "object",
-            "properties": {}
-        }
-    }
 
 scratch_buffer = ""
 
